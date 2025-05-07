@@ -1,0 +1,6 @@
+{
+    "name": "you/chat-backend",
+    "require": {
+        "cboden/ratchet": "^0.4"
+    }
+}

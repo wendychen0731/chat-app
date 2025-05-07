@@ -1,0 +1,8 @@
+1. 執行websocket伺服
+php chat-server.php
+
+2. 開啟history撈取入口
+cd C:\xampp\htdocs\chat-app\backend
+php -S 0.0.0.0:8082
+
+3. ngrok開啟並執行 ngrok start --all
