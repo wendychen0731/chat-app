@@ -1,4 +1,6 @@
 <?php
+// chat_server.php
+// -----------------------------------------------------------------------------
 // 載入 Composer 自動加載機制（會載入 vendor/autoload.php）
 require __DIR__ . '/vendor/autoload.php';
 
@@ -8,17 +10,23 @@ use Ratchet\Server\IoServer;
 use Ratchet\Http\HttpServer;
 use Ratchet\WebSocket\WsServer;
 
-class Chat implements MessageComponentInterface {
-    // 儲存所有連線的客戶端
-    protected $clients;
-    // 儲存列表使用者名稱
-    protected $names;
-    // PDO 資料庫連線
-    protected $db;
+class Chat implements MessageComponentInterface
+{
+    /** @var \SplObjectStorage|ConnectionInterface[] */
+    protected $clients;          // 所有連線
+    /** @var array<int,string>   spl_object_id(conn)  => username */
+    protected $names;            // 連線 id 對應名稱
+    /** @var array<string,ConnectionInterface> username => conn */
+    protected $userConns;        // 使用者名稱對應連線（方便私聊推送）
+    /** @var PDO */
+    protected $db;               // PDO 連線
 
-    public function __construct() {
-        $this->clients = new \SplObjectStorage;
-        $this->names   = [];
+    public function __construct()
+    {
+        $this->clients   = new \SplObjectStorage;
+        $this->names     = [];
+        $this->userConns = [];
+
         $this->db = new PDO(
             'mysql:host=127.0.0.1;dbname=chatdb;charset=utf8mb4',
             'chatuser',
@@ -27,107 +35,161 @@ class Chat implements MessageComponentInterface {
         );
     }
 
-    // 新連線時觸發：附加客戶端並發送歷史訊息
-    public function onOpen(ConnectionInterface $conn) {
+    // ────────────────────── 連線建立 ──────────────────────
+    public function onOpen(ConnectionInterface $conn)
+    {
         $this->clients->attach($conn);
+
+        // 傳最近 50 筆「公用聊天室」歷史
         $stmt = $this->db->query(
-            "SELECT username, message, created_at
+            'SELECT username, message, created_at
              FROM chat_messages
-             ORDER BY id DESC LIMIT 50"
+             ORDER BY id DESC LIMIT 50'
         );
         $history = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
         $conn->send(json_encode([
             'type'     => 'history',
-            'messages' => $history
+            'messages' => $history,
         ]));
     }
 
-    // 接收訊息時觸發
-    public function onMessage(ConnectionInterface $from, $msg) {
+    // ────────────────────── 收到訊息 ──────────────────────
+    public function onMessage(ConnectionInterface $from, $msg)
+    {
+        error_log('◆ 收到封包: ' . $msg);
         $data = json_decode($msg, true);
         $type = $data['type'] ?? 'message';
 
-        // 處理 join：記錄名稱、回傳完整在線列表、並廣播給他人
+        // ---------- 1. 使用者加入 ----------
         if ($type === 'join') {
-            $this->names[spl_object_id($from)] = $data['username'];
+            $username = $data['username'] ?? '訪客';
+            $cid      = spl_object_id($from);
+            $this->names[$cid]     = $username;
+            $this->userConns[$username] = $from;
 
-            // 廣播最新在線名單給所有人
-            $userListMsg = json_encode([
+            // 廣播線上名單
+            $this->broadcast([
                 'type'  => 'user_list',
                 'users' => array_values($this->names),
             ]);
-            foreach ($this->clients as $client) {
-                $client->send($userListMsg);
-            }
 
-            // 再廣播系統訊息 join（可選）
-            $join = json_encode([
+            // 通知其他人有人加入
+            $this->broadcast([
                 'type'       => 'join',
-                'username'   => $data['username'],
+                'username'   => $username,
                 'created_at' => date('Y-m-d H:i:s'),
-            ]);
-            foreach ($this->clients as $client) {
-                if ($client !== $from) {
-                    $client->send($join);
-                }
-            }
+            ], $exclude = [$from]);
+
             return;
         }
 
+        // ---------- 2. 私聊訊息 ----------
+        if ($type === 'private') {
+            $fromUser = $this->names[spl_object_id($from)] ?? '訪客';
+            $toUser   = $data['to'] ?? '';
+            $message  = trim($data['message'] ?? '');
 
-        // 處理一般訊息：存 DB、廣播
-        $username = $this->names[spl_object_id($from)] ?? '訪客';
-        $message  = $data['message'] ?? '';
-        $stmt = $this->db->prepare(
-            "INSERT INTO chat_messages (username, message) VALUES (?, ?)"
-        );
-        $stmt->execute([$username, $message]);
-        $payload = json_encode([
-            'type'       => 'message',
-            'username'   => $username,
-            'message'    => $message,
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
-        foreach ($this->clients as $client) {
-            $client->send($payload);
+            if ($toUser === '' || $message === '') {
+                return; // 格式不對直接丟棄
+            }
+
+            // 寫 DB
+            $stmt = $this->db->prepare(
+                'INSERT INTO private_messages (from_user, to_user, message)
+                 VALUES (?,?,?)'
+            );
+            $stmt->execute([$fromUser, $toUser, $message]);
+
+            // 回傳給收 / 發雙方
+            $payload = [
+                'type'       => 'private',
+                'from'       => $fromUser,
+                'to'         => $toUser,
+                'message'    => $message,
+                'created_at' => date('Y-m-d H:i:s'),
+            ];
+            // 發送給自己
+            $from->send(json_encode($payload));
+            // 線上才發給對方
+            if (isset($this->userConns[$toUser])) {
+                $this->userConns[$toUser]->send(json_encode($payload));
+            }
+
+            return;
+        }
+
+        // ---------- 3. 公用訊息 ----------
+        if ($type === 'message') {
+            $username = $this->names[spl_object_id($from)] ?? '訪客';
+            $message  = trim($data['message'] ?? '');
+            if ($message === '') {
+                return;
+            }
+
+            // 寫 DB
+            $stmt = $this->db->prepare(
+                'INSERT INTO chat_messages (username, message) VALUES (?,?)'
+            );
+            $stmt->execute([$username, $message]);
+
+            // 廣播
+            $this->broadcast([
+                'type'       => 'message',
+                'username'   => $username,
+                'message'    => $message,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
         }
     }
 
-    // 客戶端斷線時觸發：廣播 leave、移除記錄
-    public function onClose(ConnectionInterface $conn) {
-        $id       = spl_object_id($conn);
-        $username = $this->names[$id] ?? '訪客';
-        unset($this->names[$id]);
-    
-        // 廣播最新在線名單給所有人
-        $userListMsg = json_encode([
+    // ────────────────────── 連線關閉 ──────────────────────
+    public function onClose(ConnectionInterface $conn)
+    {
+        $cid      = spl_object_id($conn);
+        $username = $this->names[$cid] ?? '訪客';
+
+        unset($this->names[$cid]);
+        unset($this->userConns[$username]);
+        $this->clients->detach($conn);
+
+        // 更新線上名單
+        $this->broadcast([
             'type'  => 'user_list',
             'users' => array_values($this->names),
         ]);
-        foreach ($this->clients as $client) {
-            $client->send($userListMsg);
-        }
-    
-        // 廣播系統訊息 leave（可選）
-        $leave = json_encode([
+
+        // 系統離線訊息
+        $this->broadcast([
             'type'       => 'leave',
             'username'   => $username,
-            'created_at' => date('Y-m-d H:i:s')
+            'created_at' => date('Y-m-d H:i:s'),
         ]);
-        foreach ($this->clients as $client) {
-            $client->send($leave);
-        }
-    
-        $this->clients->detach($conn);
     }
-    
-    // 錯誤時觸發：記錄並關閉連線
-    public function onError(ConnectionInterface $conn, \Exception $e) {
+
+    // ────────────────────── 錯誤 ──────────────────────
+    public function onError(ConnectionInterface $conn, \Exception $e)
+    {
         error_log($e->getMessage());
         $conn->close();
     }
+
+    // ────────────────────── 工具：廣播 ──────────────────────
+    /**
+     * @param array $payload  要送出的資料（會自動 json_encode）
+     * @param ConnectionInterface[] $exclude 要排除的連線
+     */
+    protected function broadcast(array $payload, array $exclude = [])
+    {
+        $json = json_encode($payload);
+        foreach ($this->clients as $client) {
+            if (!in_array($client, $exclude, true)) {
+                $client->send($json);
+            }
+        }
+    }
 }
 
+// -----------------------------------------------------------------------------
 // 啟動 WebSocket 伺服器於 8081
 $server = IoServer::factory(
     new HttpServer(new WsServer(new Chat())),
