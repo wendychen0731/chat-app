@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 
 export default function ChatRoom() {
-  // 1️⃣ 使用 localStorage 保存使用者暱稱
+  // 使用者暱稱
   const [username] = useState(() => {
     const key = 'chat_username';
     const stored = localStorage.getItem(key);
@@ -14,38 +14,50 @@ export default function ChatRoom() {
     return name;
   });
 
-  // 訊息列表、輸入欄位、以及線上使用者列表
+  // 狀態：訊息、輸入、在線名單、連線狀態
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [users, setUsers] = useState([]);
+  const [connected, setConnected] = useState(false);
 
-  // WebSocket 連線與滾動參考
   const ws = useRef(null);
   const endRef = useRef(null);
 
-  // 滾動到最新訊息
+  // 自動滾動
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // 監聽頁面可見性，重新載入以重連
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === 'visible' && !connected) {
+        window.location.reload();
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [connected]);
+
+  // WebSocket 初始化與事件處理
   useEffect(() => {
     const HTTP_HISTORY_URL = import.meta.env.VITE_HTTP_HISTORY_URL;
     const WS_URL = import.meta.env.VITE_WS_URL;
 
-    // 抓歷史訊息
+    // 抓歷史
     fetch(HTTP_HISTORY_URL)
       .then(res => res.json())
       .then(data => setMessages(data))
       .catch(err => console.error('歷史抓取失敗：', err));
 
-    // 建立 WebSocket
     const socket = new WebSocket(WS_URL);
     ws.current = socket;
 
     socket.onopen = () => {
-      // 通知 join
+      setConnected(true);
       socket.send(JSON.stringify({ type: 'join', username }));
-      // 等待 server 回傳 'user_list' 事件來初始化在線名單
     };
 
     socket.onmessage = e => {
@@ -55,34 +67,20 @@ export default function ChatRoom() {
           case 'history':
             setMessages(pkt.messages);
             break;
-
           case 'user_list':
-            // 初始化線上使用者列表
             setUsers(pkt.users);
             break;
-
           case 'join':
-            setUsers(prev =>
-              prev.includes(pkt.username) ? prev : [...prev, pkt.username]
-            );
-            setMessages(prev => [
-              ...prev,
-              { system: true, text: `${pkt.username} 加入聊天室`, created_at: pkt.created_at }
-            ]);
+            setUsers(prev => prev.includes(pkt.username) ? prev : [...prev, pkt.username]);
+            setMessages(prev => [...prev, { system: true, text: `${pkt.username} 加入聊天室`, created_at: pkt.created_at }]);
             break;
-
           case 'leave':
             setUsers(prev => prev.filter(u => u !== pkt.username));
-            setMessages(prev => [
-              ...prev,
-              { system: true, text: `${pkt.username} 離開聊天室`, created_at: pkt.created_at }
-            ]);
+            setMessages(prev => [...prev, { system: true, text: `${pkt.username} 離開聊天室`, created_at: pkt.created_at }]);
             break;
-
           case 'message':
             setMessages(prev => [...prev, pkt]);
             break;
-
           default:
             console.warn('未知訊息類型:', pkt);
         }
@@ -91,18 +89,24 @@ export default function ChatRoom() {
       }
     };
 
-    socket.onclose = () => console.log('WebSocket 已關閉');
-    socket.onerror = err => console.error('WebSocket 錯誤', err);
+    socket.onclose = () => {
+      console.warn('WebSocket 已關閉');
+      setConnected(false);
+    };
+    socket.onerror = err => {
+      console.error('WebSocket 錯誤：', err);
+      setConnected(false);
+    };
 
-    return () => socket.close();
+    return () => {
+      socket.close();
+    };
   }, [username]);
 
   const sendMessage = () => {
     const text = input.trim();
-    if (!text) return;
-    ws.current.send(
-      JSON.stringify({ type: 'message', username, message: text })
-    );
+    if (!text || !connected) return;
+    ws.current.send(JSON.stringify({ type: 'message', username, message: text }));
     setInput('');
   };
 
@@ -110,10 +114,14 @@ export default function ChatRoom() {
     <div style={{ display: 'flex', height: '100vh', maxWidth: 800, margin: '0 auto' }}>
       {/* 聊天區 */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16 }}>
-        <h4>你是誰：{username}</h4>
-        <div
-          style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, padding: 8, overflowY: 'auto' }}
-        >
+        <h4>你是：{username}</h4>
+        {/* 斷線提示 */}
+        {!connected && (
+          <div style={{ color: 'red', marginBottom: 8, textAlign: 'center' }}>
+            已與伺服器斷線，等待重新連線...
+          </div>
+        )}
+        <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 4, padding: 8, overflowY: 'auto' }}>
           {messages.map((m, i) => (
             <div key={i} style={{ marginBottom: 4 }}>
               {m.system ? (
@@ -123,10 +131,8 @@ export default function ChatRoom() {
               ) : (
                 <>
                   <strong>{m.username}</strong>
-                  <small style={{ color: '#888', marginLeft: 8 }}>
-                    [{m.created_at}]
-                  </small>
-                  ：<span style={{ marginLeft: 4 }}>{m.message}</span>
+                  <small style={{ color: '#888', marginLeft: 8 }}>[{m.created_at}]</small>：
+                  <span style={{ marginLeft: 4 }}>{m.message}</span>
                 </>
               )}
             </div>
@@ -139,29 +145,25 @@ export default function ChatRoom() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder="輸入訊息，Enter 送出"
+            placeholder={connected ? '輸入訊息，Enter 送出' : '連線中...'}
+            disabled={!connected}
           />
-          <button style={{ marginLeft: 8, padding: '0 16px' }} onClick={sendMessage}>
+          <button
+            style={{ marginLeft: 8, padding: '0 16px' }}
+            onClick={sendMessage}
+            disabled={!connected}
+          >
             送出
           </button>
         </div>
       </div>
 
-      {/* 側欄：在線使用者列表 */}
-      <aside
-        style={{
-          width: 200,
-          borderLeft: '1px solid #ccc',
-          padding: '16px',
-          overflowY: 'auto'
-        }}
-      >
+      {/* 在線名單 */}
+      <aside style={{ width: 200, borderLeft: '1px solid #ccc', padding: 16, overflowY: 'auto' }}>
         <h3>在線用戶</h3>
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {users.map(u => (
-            <li key={u} style={{ margin: '4px 0' }}>
-              🔹 {u}
-            </li>
+            <li key={u} style={{ margin: '4px 0' }}>🔹 {u}</li>
           ))}
         </ul>
       </aside>
