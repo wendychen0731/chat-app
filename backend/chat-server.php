@@ -63,6 +63,14 @@ class Chat implements MessageComponentInterface
         // ---------- 1. 使用者加入 ----------
         if ($type === 'join') {
             $username = $data['username'] ?? '訪客';
+            if (in_array($username, $this->names, true)) {
+                $from->send(json_encode([
+                    'type'    => 'error',
+                    'message' => '此暱稱已有人使用，請換一個！'
+                ]));
+                return;
+            }
+
             $cid      = spl_object_id($from);
             $this->names[$cid]     = $username;
             $this->userConns[$username] = $from;

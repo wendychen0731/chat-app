@@ -1,0 +1,45 @@
+
+.layout {
+display: flex;
+height: 100vh;
+min-width: 600px;
+background: #f0f2f5; /* 整頁灰底，與主內容區顏色作區隔 \*/
+}
+
+
+.main {
+flex: 1;
+display: flex;
+flex-direction: column;
+padding: 16px;
+min-width: 600px;
+transition: background-color 0.3s ease;
+}
+
+
+.sidebar {
+width: 300px;
+border-left: 1px solid #ddd;
+background: #fafafa;
+padding: 16px;
+overflow-y: auto;
+}
+
+
+.sidebar h3 {
+margin-top: 0;
+margin-bottom: 12px;
+font-size: 1.1rem;
+color: #555;
+}
+
+@media (max-width: 768px) {
+.layout {
+flex-direction: column;
+}
+.sidebar {
+width: 100%;
+border-left: none;
+border-top: 1px solid #ddd;
+}
+}

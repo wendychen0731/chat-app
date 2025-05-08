@@ -5,4 +5,16 @@ php chat-server.php
 cd C:\xampp\htdocs\chat-app\backend
 php -S 0.0.0.0:8082
 
-3. ngrok開啟並執行 ngrok start --all
+3. 開啟前端dev
+cd C:\xampp\htdocs\chat-app\frontend
+npm run dev
+
+4. ngrok開啟並執行(要改對應url)
+ ngrok start --all
+
+ 修改Url:
+ 1. frontend/.env.local
+ VITE_WS_URL改成8081 port的url
+
+ 2. /vite.config.js
+ 改成5173 port的url
