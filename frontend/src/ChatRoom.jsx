@@ -1,45 +1,39 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 
 export default function ChatRoom() {
-  /* 1️⃣ 暱稱（localStorage） */
-  const [username] = useState(() => {
-    const key = 'chat_username';
-    const stored = localStorage.getItem(key);
-    if (stored) return stored;
-    const name = prompt('請輸入暱稱：', `user${Math.floor(Math.random() * 10000)}`) || '';
-    localStorage.setItem(key, name);
-    return name;
+  const KEY = 'chat_username';
+  /* 1️⃣ 狀態：暫存輸入、使用者名稱、是否已確認 */
+  const [tempName, setTempName] = useState('');
+  const [username, setUsername] = useState(() => {
+    const saved = localStorage.getItem(KEY);
+    return saved && saved.trim() ? saved.trim() : '';
   });
+  const [isConfirmed, setIsConfirmed] = useState(() => !!username);
 
-  /* 2️⃣ state */
+  /* 2️⃣ 只有在確認後才執行後續邏輯 */
   const [messages, setMessages] = useState([]);
   const [input, setInput]       = useState('');
   const [users, setUsers]       = useState([]);
-  const [room, setRoom]         = useState('');                 // '' = 公用
-  const [unread, setUnread]     = useState({ '': 0 });          // 🆕 追蹤所有房間未讀
+  const [room, setRoom]         = useState('');
+  const [unread, setUnread]     = useState({ '': 0 });
 
-  /* 3️⃣ refs */
+  /* refs */
   const wsRef   = useRef(null);
   const endRef  = useRef(null);
   const roomRef = useRef(room);
 
-  /* 4️⃣ 工具：未讀 +1／清零 ──────────────────────────────── */
-  // 🆕 放前面，後面任何 callback 都能安全引用
+  /* 未讀邏輯 */
   const incUnread = useCallback(target => {
     setUnread(prev => ({
       ...prev,
       [target]: (prev[target] || 0) + 1,
     }));
   }, []);
-
   const clearUnread = useCallback(target => {
-    setUnread(prev => ({
-      ...prev,
-      [target]: 0,
-    }));
+    setUnread(prev => ({ ...prev, [target]: 0 }));
   }, []);
 
-  /* 5️⃣ 抓歷史訊息 */
+  /* 抓歷史訊息 */
   const fetchHistory = useCallback(targetRoom => {
     const base = import.meta.env.VITE_HTTP_HISTORY_URL;
     const url  = targetRoom === ''
@@ -51,7 +45,7 @@ export default function ChatRoom() {
       .catch(console.error);
   }, [username]);
 
-  /* 6️⃣ 抓線上列表 */
+  /* 抓線上列表 */
   const fetchUsers = useCallback(() => {
     fetch(import.meta.env.VITE_HTTP_USERS_URL)
       .then(r => r.json())
@@ -59,7 +53,7 @@ export default function ChatRoom() {
       .catch(console.error);
   }, []);
 
-  /* 7️⃣ WebSocket init ─────────────────────────────────── */
+  /* WebSocket 初始化 */
   const initWebSocket = useCallback(() => {
     wsRef.current?.close();
     const socket = new WebSocket(import.meta.env.VITE_WS_URL);
@@ -71,27 +65,13 @@ export default function ChatRoom() {
 
     socket.onmessage = e => {
       const pkt = JSON.parse(e.data);
-
-      /* ---------- 錯誤 ---------- */
       if (pkt.type === 'error') {
         alert(pkt.message);
-        const newName = prompt('請輸入新的暱稱：', '');
-        if (newName) {
-          localStorage.setItem('chat_username', newName);
-          window.location.reload();
-        }
+        window.location.reload();
         return;
       }
-
-      /* ---------- 系統／線上列表 ---------- */
-      if (pkt.type === 'history') {
-        setMessages(pkt.messages);
-        return;
-      }
-      if (pkt.type === 'user_list') {
-        setUsers(pkt.users);
-        return;
-      }
+      if (pkt.type === 'history') { setMessages(pkt.messages); return; }
+      if (pkt.type === 'user_list') { setUsers(pkt.users); return; }
       if (pkt.type === 'join') {
         setUsers(u => (u.includes(pkt.username) ? u : [...u, pkt.username]));
         setMessages(m => [...m, { system: true, text: `${pkt.username} 加入`, created_at: pkt.created_at }]);
@@ -102,24 +82,20 @@ export default function ChatRoom() {
         setMessages(m => [...m, { system: true, text: `${pkt.username} 離開`, created_at: pkt.created_at }]);
         return;
       }
-
-      /* ---------- 公用訊息 ---------- */
       if (pkt.type === 'message') {
         if (roomRef.current === '') {
-          setMessages(m => [...m, pkt]);         // 正在看公用
+          setMessages(m => [...m, pkt]);
         } else {
-          incUnread('');                         // 🆕 背景未讀
+          incUnread('');
         }
         return;
       }
-
-      /* ---------- 私聊訊息 ---------- */
       if (pkt.type === 'private') {
         const peer = pkt.from === username ? pkt.to : pkt.from;
         if (peer === roomRef.current) {
-          setMessages(m => [...m, pkt]);         // 正在看
+          setMessages(m => [...m, pkt]);
         } else {
-          incUnread(peer);                       // 🆕 背景未讀
+          incUnread(peer);
         }
         return;
       }
@@ -127,9 +103,9 @@ export default function ChatRoom() {
 
     socket.onclose = () => {};
     socket.onerror = () => {};
-  }, [username, incUnread]);                      // 🆕 incUnread 也放依賴
+  }, [username, incUnread]);
 
-  /* 8️⃣ 重連及可見事件 */
+  /* 可見性 & 重連 */
   const handleVisibility = useCallback(() => {
     if (document.visibilityState === 'visible') {
       const ws = wsRef.current;
@@ -141,7 +117,9 @@ export default function ChatRoom() {
     }
   }, [fetchHistory, fetchUsers, initWebSocket]);
 
+  /* 主流程：只有確認後才執行 */
   useEffect(() => {
+    if (!isConfirmed) return;
     fetchHistory(roomRef.current);
     fetchUsers();
     initWebSocket();
@@ -150,14 +128,14 @@ export default function ChatRoom() {
       document.removeEventListener('visibilitychange', handleVisibility);
       wsRef.current?.close();
     };
-  }, [fetchHistory, fetchUsers, initWebSocket, handleVisibility]);
+  }, [isConfirmed, fetchHistory, fetchUsers, initWebSocket, handleVisibility]);
 
-  /* 9️⃣ 捲到底 */
+  /* 捲到底 */
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  /* 🔟 送訊息 */
+  /* 送訊息 */
   const sendMessage = () => {
     const txt = input.trim(); if (!txt) return;
     const payload = roomRef.current === ''
@@ -165,15 +143,25 @@ export default function ChatRoom() {
       : { type: 'private', to: roomRef.current, message: txt };
     wsRef.current.send(JSON.stringify(payload));
     setInput('');
-    // 自己送出的訊息不算未讀
   };
 
-  /* 11️⃣ 連線狀態 */
+  /* 連線狀態 */
   const ready        = wsRef.current?.readyState;
   const isConnected  = ready === WebSocket.OPEN;
   const isConnecting = ready === WebSocket.CONNECTING;
 
-  /* ─────────── UI ─────────── */
+  /* 設定按鈕事件 */
+  const handleConfirm = () => {
+    if (!tempName.trim()) {
+      alert('暱稱不得為空');
+      return;
+    }
+    localStorage.setItem(KEY, tempName.trim());
+    setUsername(tempName.trim());
+    setIsConfirmed(true);
+  };
+
+  /* 缺少樣式定義，需補上 */
   const mainStyle = {
     flex: 1,
     padding: 16,
@@ -187,6 +175,22 @@ export default function ChatRoom() {
     marginBottom: 8,
     color: room === '' ? '#0050b3' : '#ad4e00',
   };
+
+  /* UI */
+  if (!isConfirmed) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <h3>請輸入暱稱才可進入聊天室</h3>
+        <input
+          value={tempName}
+          onChange={e => setTempName(e.target.value)}
+          placeholder="輸入暱稱…"
+          style={{ padding: '8px', width: 200, marginBottom: 8 }}
+        />
+        <button onClick={handleConfirm} style={{ padding: '8px 16px' }}>確定</button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', minWidth: 600 }}>
@@ -261,7 +265,7 @@ export default function ChatRoom() {
             }
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
+            onKeyUp={e => e.key === 'Enter' && sendMessage()}
           />
           <button
             disabled={!isConnected}
@@ -314,7 +318,7 @@ export default function ChatRoom() {
           </li>
 
           {/* 私聊清單 */}
-          {users.map(u => (
+          {users.filter(u => u !== username).map(u => (
             <li
               key={u}
               style={{

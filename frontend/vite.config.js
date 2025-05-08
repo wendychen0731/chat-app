@@ -9,14 +9,15 @@ export default defineConfig({
     port: 5173, // dev server 埠號
     strictPort: true,
     // 加上 ngrok domain 到 allowedHosts
-    allowedHosts: [
-      '8f45-61-220-233-9.ngrok-free.app'
-    ],
+    // allowedHosts: [
+    //   'b2be-61-220-233-9.ngrok-free.app'
+    // ],
+    allowedHosts: 'all',
     // 如果要讓 HMR 也能透過 ngrok 正確連線，可加下面設定
     // 前端port 5173
     hmr: {
       protocol: 'wss',
-      host: '8f45-61-220-233-9.ngrok-free.app',
+      host: 'b2be-61-220-233-9.ngrok-free.app',
     }
   }
 })

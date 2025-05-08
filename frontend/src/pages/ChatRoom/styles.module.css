@@ -1,45 +1,81 @@
+/*
+ * styles.module.css
+ *
+ * 定義聊天室頁面的整體佈局與樣式，包括主區域與側邊欄，以及響應式行為。
+ */
 
-.layout {
-display: flex;
-height: 100vh;
-min-width: 600px;
-background: #f0f2f5; /* 整頁灰底，與主內容區顏色作區隔 \*/
-}
-
-
-.main {
-flex: 1;
-display: flex;
-flex-direction: column;
-padding: 16px;
-min-width: 600px;
-transition: background-color 0.3s ease;
-}
-
-
-.sidebar {
-width: 300px;
-border-left: 1px solid #ddd;
-background: #fafafa;
-padding: 16px;
-overflow-y: auto;
-}
-
-
-.sidebar h3 {
-margin-top: 0;
-margin-bottom: 12px;
-font-size: 1.1rem;
-color: #555;
-}
-
-@media (max-width: 768px) {
-.layout {
-flex-direction: column;
-}
-.sidebar {
-width: 100%;
-border-left: none;
-border-top: 1px solid #ddd;
-}
-}
+/*
+ * .layout
+ * - 使用 flex 佈局，橫向排列主區域與側邊欄
+ * - 高度佔滿整個視窗
+ * - 最小寬度 600px，避免內容擠壓
+ * - 背景色為淡灰色，與主內容區分隔
+ */
+ .layout {
+    display: flex;
+    height: 100vh;
+    min-width: 600px;
+    background: #f0f2f5;
+  }
+  
+  /*
+   * .main
+   * - 主內容區，flex:1 佔滿剩餘寬度
+   * - 以 column 方向排版，方便上下堆疊標題、訊息列表與輸入區
+   * - 內邊距 16px
+   * - 最小寬度 600px，確保聊天介面可用
+   * - 背景色切換時添加平滑過渡效果
+   */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    min-width: 600px;
+    transition: background-color 0.3s ease;
+  }
+  
+  /*
+   * .sidebar
+   * - 側邊欄固定寬度 300px
+   * - 左側加上 1px 實線分隔線
+   * - 背景色為近白，與主內容區形成對比
+   * - 內邊距 16px
+   * - 支援垂直捲動，顯示完整在線用戶列表
+   */
+  .sidebar {
+    width: 300px;
+    border-left: 1px solid #ddd;
+    background: #fafafa;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  
+  /*
+   * .sidebar h3
+   * - 標題區域，去除預設上邊距
+   * - 下邊距 12px 確保與列表間距
+   * - 字體大小與顏色設定
+   */
+  .sidebar h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 1.1rem;
+    color: #555;
+  }
+  
+  /*
+   * 響應式設計：在螢幕寬度小於等於 768px 時
+   * - 將整個 layout 轉為 column 排列
+   * - 側邊欄寬度改為 100%，移除左側邊框，改為上方邊框分隔
+   */
+  @media (max-width: 768px) {
+    .layout {
+      flex-direction: column;
+    }
+    .sidebar {
+      width: 100%;
+      border-left: none;
+      border-top: 1px solid #ddd;
+    }
+  }
